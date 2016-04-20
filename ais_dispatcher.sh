@@ -95,7 +95,7 @@ pidfile.close()
 #socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #connectedKCS = False
 #connectedQUEUE = False
-#connectionRetry = 5
+connectionRetry = 0.5
 
 def checkBoat(vehicleLicense):
 	try:
@@ -203,7 +203,9 @@ def callback(ch, method, properties, body):
         logger.error('Error sending data: %s', error)
         try:
 			socketKCS.close()
-	except:
+			logger.info('Trying close connection...')
+	except Exception, error:
+		logger.info('Error closing connection: %s', error)
 		pass
 	while sendMessage==False:
 		try:
@@ -218,6 +220,7 @@ def callback(ch, method, properties, body):
 			socketKCS.close()
 		except Exception, error:
 			logger.info('Reconnection to KCS failed....waiting %d seconds to retry.' , connectionRetry)
+			sendMessage=False
 			try:
 				socketKCS.close()
 			except:
@@ -250,6 +253,7 @@ except Exception, error:
 			logger.info('Connected at QUEUE again!!!')
 			channel.start_consuming()
 		except Exception, error:
+			connectedQUEUE = False
 			logger.info('Reconnection to QUEUE failed....waiting %d seconds to retry.' , connectionRetry)
 			time.sleep(connectionRetry)
 			
