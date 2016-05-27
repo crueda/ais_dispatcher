@@ -48,6 +48,11 @@ QUEUE_NAME = config['queue_name']
 KCS_HOST = config['KCS_HOST']
 KCS_PORT = config['KCS_PORT']
 
+MAX_LAT = config['max_lat']
+MIN_LAT = config['min_lat']
+MAX_LON = config['max_lon']
+MIN_LON = config['min_lon']
+
 DEFAULT_SLEEP_TIME = float(config['sleep_time'])
 
 PID = "/var/run/ais_dispatcher"
@@ -115,13 +120,43 @@ def checkBoat(vehicleLicense):
 	except Exception, error:
 		logger.error('Error executing query: %s', error)
 
+def getLongitude(body):
+	try:
+		lon = body.split(',')[2]
+		return lon
+	except Exception, error:
+		logger.error('error parsing message: %s' % error)	
+
+def getLatitude(body):
+	try:
+		lat = body.split(',')[3]
+		return lat
+	except Exception, error:
+		logger.error('error parsing message: %s' % error)	
+
+def setVesselInOut(vehicleLicense, inout):
+	try:
+		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
+	except Exception, error:
+		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
+	try:
+		query = """UPDATE VEHICLE SET VEHICLE.INOUT=xxx WHERE VEHICLE_LICENSE=vvv"""
+		queryINOUT = query.replace('vvv', str(vehicleLicense)).replace('xxx', str(inout))
+		cursor = dbConnection.cursor()
+		cursor.execute(queryINOUT)
+		dbConnection.commit()
+		logger.info('Inout of boat %s modified to %s', vehicleLicense, inout)
+		cursor.close
+	except Exception, error:
+		logger.error('Error executing query : %s', error)
+
 def addBoat(vehicleLicense):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 	except Exception, error:
 		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 	try:
-		query = """INSERT INTO VEHICLE (VEHICLE_LICENSE,BASTIDOR,ALIAS,POWER_SWITCH,ALARM_STATE,SPEAKER,START_STATE,WARNER,PRIVATE_MODE,WORKING_SCHEDULE,ALARM_ACTIVATED,PASSWORD,CELL_ID,ICON_DEVICE, KIND_DEVICE,AIS_TYPE,MAX_SPEED,CONSUMPTION,CLAXON,MODEL_TRANSPORT,PROTOCOL_ID,BUILT,CALLSIGN,MAX_PERSONS,MOB,EXCLUSION_ZONE,FLAG,INITIAL_DATE_PURCHASE) VALUES (xxx,xxx,xxx,-1,-1,-1,'UNKNOWN',-1,0,0,0,'',0,1000,1,3,500,0.0,-1,'boat',0,0,xxx,-1,-1,0,'',NOW())"""
+		query = """INSERT INTO VEHICLE (VEHICLE_LICENSE,BASTIDOR,ALIAS,POWER_SWITCH,ALARM_STATE,SPEAKER,START_STATE,WARNER,PRIVATE_MODE,WORKING_SCHEDULE,ALARM_ACTIVATED,PASSWORD,CELL_ID,ICON_DEVICE, KIND_DEVICE,AIS_TYPE,MAX_SPEED,CONSUMPTION,CLAXON,MODEL_TRANSPORT,PROTOCOL_ID,BUILT,CALLSIGN,MAX_PERSONS,MOB,EXCLUSION_ZONE,FLAG,INITIAL_DATE_PURCHASE) VALUES (xxx,'',xxx,-1,-1,-1,'UNKNOWN',-1,0,0,0,'',0,1000,1,3,500,0.0,-1,'boat',0,0,xxx,-1,-1,0,'',NOW())"""
 		QUERY = query.replace('xxx', vehicleLicense)
 		cursor = dbConnection.cursor()
 		cursor.execute(QUERY)
@@ -188,6 +223,15 @@ def callback(ch, method, properties, body):
 		#time.sleep(0.1)
     else:
 		logger.info('Boat %s found at database', vehicleLicense)
+
+    lon = getLongitude(body)
+    lat = getLatitude(body)
+    if (lon<MIN_LON or lon>MAX_LON or lat>MAX_LAT or lat<MIN_LAT):
+		setVesselInOut(vehicleLicense, 0)
+    else:
+		setVesselInOut(vehicleLicense, 1)
+
+
 	
     try:
 		socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
