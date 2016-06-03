@@ -39,6 +39,11 @@ DB_NAME = "sumo"
 DB_USER = "root"
 DB_PASSWORD = "dat1234"
 
+SPATIAL_DB_IP = "192.168.27.5"
+SPATIAL_DB_NAME = "sumo"
+SPATIAL_DB_USER = "root"
+SPATIAL_DB_PASSWORD = "dat1234"
+
 RABBITMQ_HOST = config['rabbitMQ_HOST']
 RABBITMQ_PORT = config['rabbitMQ_PORT']
 RABBITMQ_ADMIN_USERNAME = config['rabbitMQ_admin_username']
@@ -120,6 +125,13 @@ def checkBoat(vehicleLicense):
 	except Exception, error:
 		logger.error('Error executing query: %s', error)
 
+def getSpecialField(body):
+	try:
+		field = body.split(',')[1]
+		return field
+	except Exception, error:
+		logger.error('error parsing message: %s' % error)	
+
 def getLongitude(body):
 	try:
 		lon = body.split(',')[2]
@@ -195,10 +207,44 @@ def addComplementary(vehicleLicense, deviceID):
 		dbConnection.close()
 	except Exception, error:
 		logger.error('Error executing query: %s', error)
-		
-		
-	
 
+def saveSpatialPoint(VEHICLE_LICENSE, LON, LAT):
+	try:
+		dbConnection = MySQLdb.connect(SPATIAL_DB_IP, SPATIAL_DB_USER, SPATIAL_DB_PASSWORD, SPATIAL_DB_NAME)
+	except Exception, error:
+		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', SPATIAL_DB_IP, SPATIAL_DB_USER, SPATIAL_DB_PASSWORD, SPATIAL_DB_NAME, error)
+	try:
+		query = "INSERT INTO TRACKING_SPATIAL (VEHICLE_LICENSE, PT) values (%s, POINT(%s, %s)) ON DUPLICATE KEY UPDATE PT=POINT(%s,%s)" % (VEHICLE_LICENSE, LON, LAT, LON, LAT)
+		cursor = dbConnection.cursor()
+		cursor.execute(query)
+		dbConnection.commit()
+		logger.info('Saved spatial point for vehicle %s', VEHICLE_LICENSE)
+		cursor.close
+		dbConnection.close()
+	except Exception, error:
+		logger.error('Error executing query: %s', error)
+
+def getBoatCloser(LON,LAT, ratio):
+	try:
+		dbConnection = MySQLdb.connect(SPATIAL_DB_IP, SPATIAL_DB_USER, SPATIAL_DB_PASSWORD, SPATIAL_DB_NAME)
+	except Exception, error:
+		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', SPATIAL_DB_IP, SPATIAL_DB_USER, SPATIAL_DB_PASSWORD, SPATIAL_DB_NAME, error)
+	try:
+		query = "SELECT VEHICLE_LICENSE, ST_DISTANCE_SPHERE(TRACKING_SPATIAL.PT, POINT(%s, %s)) from TRACKING_SPATIAL where ST_DISTANCE_SPHERE(TRACKING_SPATIAL.PT, POINT(%s, %s)) < %s" % (LON, LAT, LON, LAT, ratio)
+		cursor = dbConnection.cursor()
+		cursor.execute(query)
+		result = cursor.fetchall()
+		#print result
+		if len(result)>1 :
+			return result
+		else :
+			return 0
+		#return result[0][0]
+		cursor.close
+		dbConnection.close
+	except Exception, error:
+		logger.error('Error executing query: %s', error)
+		
 def getvehicleLicense(body):
 	try:
 		vehicleLicense = body.split(',')[0]
@@ -206,6 +252,68 @@ def getvehicleLicense(body):
 	except Exception, error:
 		logger.error('error parsing message: %s' % error)	
 
+def newLogAlarm(vehicle1_license, vehicle2_license):
+	try:
+		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
+	except Exception, error:
+		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
+		print "error conexion" + str(error)
+	try:
+		msg = "Posibble clash of vessels: " + vehicle1_license + " - " + vehicle1_license
+		query = """SELECT ID FROM LOGS WHERE MESSAGE='mmm'"""
+		queryCheckLog = query.replace('mmm', str(msg))
+		cursor = dbConnection.cursor()
+		cursor.execute(queryCheckLog)
+		result = cursor.fetchall()
+		queryNewLog = "INSERT INTO LOGS (MESSAGE,FINISHED,LOG_TYPE,LEVEL,LOG_DATE) VALUES('" + msg + "',0,1,2," + str(long(time.time())) + ")"
+		if len(result)>0 : 
+			# Existe el log asi que solo actualizo la fecha
+			queryNewLog = "UPDATE LOGS SET LOG_DATE='" + str(long(time.time())) + "' WHERE ID=" + str(result[0][0])
+		print queryNewLog
+		cursor.execute(queryNewLog)
+		cursor.close
+		dbConnection.commit()
+		#logger.info('New log alarm: %s', msg)
+		dbConnection.close()
+	except Exception, error:
+		print "error:"+str(error)
+		#logger.error('Error executing query : %s', error)
+
+def getMaxRadius():
+	try:
+		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
+	except Exception, error:
+		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
+		print "error conexion" + str(error)
+	try:
+		query = """SELECT MAX(RADIUS) FROM VEHICLE"""
+		cursor = dbConnection.cursor()
+		cursor.execute(query)
+		result = cursor.fetchall()
+		return result[0][0]
+		cursor.close
+		dbConnection.close()
+	except Exception, error:
+		print "error:"+str(error)
+		#logger.error('Error executing query : %s', error)
+
+def getBoatRadius(vehicleLicense):
+	try:
+		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
+	except Exception, error:
+		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
+		print "error conexion" + str(error)
+	try:
+		query = "SELECT RADIUS FROM VEHICLE WHERE VEHICLE_LICENSE='"+vehicleLicense+"'"
+		cursor = dbConnection.cursor()
+		cursor.execute(query)
+		result = cursor.fetchall()
+		return result[0][0]
+		cursor.close
+		dbConnection.close()
+	except Exception, error:
+		print "error:"+str(error)
+		#logger.error('Error executing query : %s', error)
 
 def callback(ch, method, properties, body):
     sendMessage = False
@@ -226,11 +334,29 @@ def callback(ch, method, properties, body):
 
     lon = getLongitude(body)
     lat = getLatitude(body)
-    if (lon<MIN_LON or lon>MAX_LON or lat>MAX_LAT or lat<MIN_LAT):
-		setVesselInOut(vehicleLicense, 0)
-    else:
-		setVesselInOut(vehicleLicense, 1)
 
+    if (getSpecialField(body)!='$'):
+    	#insertar en la bbdd espacial
+    	saveSpatialPoint(vehicleLicense,lon,lat)
+    	maxradius = getMaxRadius()
+    	boatRadius = getBoatRadius(vehicleLicense)
+    	boatNearby = getBoatCloser(lon,lat, maxradius)
+    	if (boatNearby!=0):
+    		for boat in boatNearby:
+    			matricula = boat[0]
+    			distance = boat[1]
+    			#print matricula
+    			#print distance
+    			if (int(distance) < boatRadius):
+    				#print "-->"+ vehicleLicense + "--" + matricula
+    				if (vehicleLicense!=matricula):
+    					newLogAlarm(vehicleLicense, matricula)
+
+    	#comprobar si esta dentro de la zona de windfarm
+    	if (lon<MIN_LON or lon>MAX_LON or lat>MAX_LAT or lat<MIN_LAT):
+			setVesselInOut(vehicleLicense, 0)
+    	else:
+			setVesselInOut(vehicleLicense, 1)
 
 	
     try:
