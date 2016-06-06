@@ -259,17 +259,22 @@ def newLogAlarm(vehicle1_license, vehicle2_license):
 		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 		print "error conexion" + str(error)
 	try:
-		msg = "Posibble clash of vessels: " + vehicle1_license + " - " + vehicle1_license
+		cursor = dbConnection.cursor()
+		msg = "Posibble clash of vessels: " + vehicle1_license + " - " + vehicle2_license
+		msg_oposite = "Posibble clash of vessels: " + vehicle2_license + " - " + vehicle1_license
+		query_delete_oposite = "DELETE FROM LOGS where MESSAGE='" + msg_oposite + "'"
+		cursor.execute(query_delete_oposite)
+		#dbConnection.commit()
+
 		query = """SELECT ID FROM LOGS WHERE MESSAGE='mmm'"""
 		queryCheckLog = query.replace('mmm', str(msg))
-		cursor = dbConnection.cursor()
 		cursor.execute(queryCheckLog)
 		result = cursor.fetchall()
-		queryNewLog = "INSERT INTO LOGS (MESSAGE,FINISHED,LOG_TYPE,LEVEL,LOG_DATE) VALUES('" + msg + "',0,1,2," + str(long(time.time())) + ")"
+		queryNewLog = "INSERT INTO LOGS (MESSAGE,FINISHED,LOG_TYPE,LEVEL,LOG_DATE) VALUES('" + msg + "',0,1,2," + str(long(time.time())*1000) + ")"
 		if len(result)>0 : 
 			# Existe el log asi que solo actualizo la fecha
-			queryNewLog = "UPDATE LOGS SET LOG_DATE='" + str(long(time.time())) + "' WHERE ID=" + str(result[0][0])
-		print queryNewLog
+			queryNewLog = "UPDATE LOGS SET LOG_DATE='" + str(long(time.time())*1000) + "' WHERE ID=" + str(result[0][0])
+		#print queryNewLog
 		cursor.execute(queryNewLog)
 		cursor.close
 		dbConnection.commit()
@@ -343,14 +348,19 @@ def callback(ch, method, properties, body):
     	boatNearby = getBoatCloser(lon,lat, maxradius)
     	if (boatNearby!=0):
     		for boat in boatNearby:
-    			matricula = boat[0]
+    			newVehicleLicense = boat[0]
     			distance = boat[1]
     			#print matricula
     			#print distance
     			if (int(distance) < boatRadius):
-    				#print "-->"+ vehicleLicense + "--" + matricula
-    				if (vehicleLicense!=matricula):
-    					newLogAlarm(vehicleLicense, matricula)
+    				#print "-->"+ vehicleLicense + "--" + newVehicleLicense
+    				if (vehicleLicense!=newVehicleLicense):
+    					#print "-->"+ vehicleLicense + "--" + newVehicleLicense    				
+    					#print "***log************"
+    					logger.info("Posibble clash of vessels: " + vehicleLicense + " - " + newVehicleLicense)
+    					newLogAlarm(vehicleLicense, newVehicleLicense)
+    				#else:
+    					#print "***no log************"
 
     	#comprobar si esta dentro de la zona de windfarm
     	if (lon<MIN_LON or lon>MAX_LON or lat>MAX_LAT or lat<MIN_LAT):
@@ -369,8 +379,9 @@ def callback(ch, method, properties, body):
 		ch.basic_ack(delivery_tag = method.delivery_tag)
 		socketKCS.close()
         	time.sleep(DEFAULT_SLEEP_TIME)
-    except Exception, error:
-        logger.error('Error sending data: %s', error)
+    except socket.error,v:
+        print v[0]
+        logger.error('Error sending data: %s', v[0])
         try:
 			socketKCS.close()
 			logger.info('Trying close connection...')
