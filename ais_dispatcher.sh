@@ -154,6 +154,7 @@ def setVesselInOut(vehicleLicense, inout):
 	try:
 		query = """UPDATE VEHICLE SET VEHICLE.INOUT=xxx WHERE VEHICLE_LICENSE=vvv"""
 		queryINOUT = query.replace('vvv', str(vehicleLicense)).replace('xxx', str(inout))
+		print queryINOUT
 		cursor = dbConnection.cursor()
 		cursor.execute(queryINOUT)
 		dbConnection.commit()
@@ -168,7 +169,7 @@ def addBoat(vehicleLicense):
 	except Exception, error:
 		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 	try:
-		query = """INSERT INTO VEHICLE (VEHICLE_LICENSE,BASTIDOR,ALIAS,POWER_SWITCH,ALARM_STATE,SPEAKER,START_STATE,WARNER,PRIVATE_MODE,WORKING_SCHEDULE,ALARM_ACTIVATED,PASSWORD,CELL_ID,ICON_DEVICE, KIND_DEVICE,AIS_TYPE,MAX_SPEED,CONSUMPTION,CLAXON,MODEL_TRANSPORT,PROTOCOL_ID,BUILT,CALLSIGN,MAX_PERSONS,MOB,EXCLUSION_ZONE,FLAG,INITIAL_DATE_PURCHASE) VALUES (xxx,'',xxx,-1,-1,-1,'UNKNOWN',-1,0,0,0,'',0,1000,1,3,500,0.0,-1,'boat',0,0,xxx,-1,-1,0,'',NOW())"""
+		query = """INSERT INTO VEHICLE (VEHICLE_LICENSE,BASTIDOR,ALIAS,POWER_SWITCH,ALARM_STATE,SPEAKER,START_STATE,WARNER,PRIVATE_MODE,WORKING_SCHEDULE,ALARM_ACTIVATED,PASSWORD,CELL_ID,ICON_DEVICE, KIND_DEVICE,AIS_TYPE,MAX_SPEED,CONSUMPTION,CLAXON,MODEL_TRANSPORT,PROTOCOL_ID,BUILT,CALLSIGN,MAX_PERSONS,MOB,EXCLUSION_ZONE,FLAG,INITIAL_DATE_PURCHASE) VALUES (xxx,xxx,xxx,-1,-1,-1,'UNKNOWN',-1,0,0,0,'',0,1000,1,3,500,0.0,-1,'boat',0,0,xxx,-1,-1,50,'',NOW())"""
 		QUERY = query.replace('xxx', vehicleLicense)
 		cursor = dbConnection.cursor()
 		cursor.execute(QUERY)
@@ -252,7 +253,7 @@ def getvehicleLicense(body):
 	except Exception, error:
 		logger.error('error parsing message: %s' % error)	
 
-def newLogAlarm(vehicle1_license, vehicle2_license):
+def newLogAlarm(vehicle1_license, vehicle1_alias, vehicle2_license, vehicle2_alias):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 	except Exception, error:
@@ -260,8 +261,15 @@ def newLogAlarm(vehicle1_license, vehicle2_license):
 		print "error conexion" + str(error)
 	try:
 		cursor = dbConnection.cursor()
-		msg = "Posibble clash of vessels: " + vehicle1_license + " - " + vehicle2_license
-		msg_oposite = "Posibble clash of vessels: " + vehicle2_license + " - " + vehicle1_license
+
+		#corregir el alias
+		if (vehicle1_alias=='AIS vessel'):
+			vehicle1_alias = vehicle1_license
+		if (vehicle2_alias=='AIS vessel'):
+			vehicle2_alias = vehicle2_license
+
+		msg = "Posibble clash of vessels: " + vehicle1_alias + " (" + vehicle1_license + ")" + " - " + vehicle2_alias + " (" + vehicle2_license + ")"
+		msg_oposite = "Posibble clash of vessels: " + vehicle2_alias + " (" + vehicle2_license + ")" + " - " + vehicle1_alias + " (" + vehicle1_license + ")"
 		query_delete_oposite = "DELETE FROM LOGS where MESSAGE='" + msg_oposite + "'"
 		cursor.execute(query_delete_oposite)
 		#dbConnection.commit()
@@ -291,7 +299,7 @@ def getMaxRadius():
 		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 		print "error conexion" + str(error)
 	try:
-		query = """SELECT MAX(RADIUS) FROM VEHICLE"""
+		query = """SELECT MAX(EXCLUSION_ZONE) FROM VEHICLE"""
 		cursor = dbConnection.cursor()
 		cursor.execute(query)
 		result = cursor.fetchall()
@@ -302,18 +310,18 @@ def getMaxRadius():
 		print "error:"+str(error)
 		#logger.error('Error executing query : %s', error)
 
-def getBoatRadius(vehicleLicense):
+def getBoatData(vehicleLicense):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 	except Exception, error:
 		#logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 		print "error conexion" + str(error)
 	try:
-		query = "SELECT RADIUS FROM VEHICLE WHERE VEHICLE_LICENSE='"+vehicleLicense+"'"
+		query = "SELECT EXCLUSION_ZONE, ALIAS FROM VEHICLE WHERE VEHICLE_LICENSE='"+vehicleLicense+"'"
 		cursor = dbConnection.cursor()
 		cursor.execute(query)
 		result = cursor.fetchall()
-		return result[0][0]
+		return result[0]
 		cursor.close
 		dbConnection.close()
 	except Exception, error:
@@ -344,7 +352,9 @@ def callback(ch, method, properties, body):
     	#insertar en la bbdd espacial
     	saveSpatialPoint(vehicleLicense,lon,lat)
     	maxradius = getMaxRadius()
-    	boatRadius = getBoatRadius(vehicleLicense)
+    	boatData = getBoatData(vehicleLicense)
+    	boatRadius = boatData[0]
+    	boatAlias = boatData[1]
     	boatNearby = getBoatCloser(lon,lat, maxradius)
     	if (boatNearby!=0):
     		for boat in boatNearby:
@@ -357,8 +367,10 @@ def callback(ch, method, properties, body):
     				if (vehicleLicense!=newVehicleLicense):
     					#print "-->"+ vehicleLicense + "--" + newVehicleLicense    				
     					#print "***log************"
+    					newBoatData = getBoatData(newVehicleLicense)
+    					newBoatAlias = newBoatData[1]
     					logger.info("Posibble clash of vessels: " + vehicleLicense + " - " + newVehicleLicense)
-    					newLogAlarm(vehicleLicense, newVehicleLicense)
+    					newLogAlarm(vehicleLicense, boatAlias, newVehicleLicense, newBoatAlias)
     				#else:
     					#print "***no log************"
 
