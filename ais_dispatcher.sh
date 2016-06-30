@@ -13,7 +13,8 @@
 
 from __future__ import division
 import time
-import datetime
+from datetime import datetime, timedelta
+from pytz import timezone
 import os
 import sys
 import utm
@@ -36,7 +37,7 @@ LOG_FOR_ROTATE = 10
 
 DB_IP = "localhost"
 DB_NAME = "sumo"
-DB_USER = "root"
+DB_USER = "user_dispatcher"
 DB_PASSWORD = "dat1234"
 
 SPATIAL_DB_IP = "192.168.27.5"
@@ -150,7 +151,7 @@ def setVesselInOut(vehicleLicense, inout):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 		try:
-		    query = """UPDATE VEHICLE SET VEHICLE.INOUT=xxx WHERE VEHICLE_LICENSE=vvv"""
+		    query = """UPDATE VEHICLE SET VEHICLE.INOUT=xxx WHERE VEHICLE_LICENSE='vvv'"""
 		    queryINOUT = query.replace('vvv', str(vehicleLicense)).replace('xxx', str(inout))
 		    cursor = dbConnection.cursor()
 		    cursor.execute(queryINOUT)
@@ -266,6 +267,40 @@ def getvehicleLicense(body):
 	except Exception, error:
 		logger.error('error parsing message: %s' % error)	
 
+def recordEvent(vehicle1_device, vehicle1_alias, vehicle2_device, vehicle2_alias):
+	try:
+		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
+		try:
+		    cursor = dbConnection.cursor()
+		    #consultar urls a enviar
+		    query = """SELECT URL FROM SUBSCRIBER where ID in (SELECT SUBSCRIBER_ID FROM SUBSCRIPTION where EVENT_TYPE=27)"""
+		    cursor.execute(query)
+		    cursorEvent = dbConnection.cursor()
+		    row = cursor.fetchall()
+		    while row is not None:
+		    	now_utc = datetime.now(timezone('UTC'))
+		    	hora = timedelta(hours=1)
+		    	future_utc = now_utc + hora
+		    	timestamp = now_utc.strftime("%Y-%m-%dT%H:%M:%S.00Z")
+		    	expirationTime = future_utc.strftime("%Y-%m-%dT%H:%M:%S.00Z")
+		    	data = '{"eventType":27,"resourceId":"' + str(vehicle1_device) + '","resource2Id":"' + str(vehicle2_device) + '","resourceName":"' + str(vehicle1_alias) + '","resource2Name":"' + str(vehicle2_alias) + '","timestamp":"' + timestamp + '","expirationTime":"' + expirationTime + '","source":"KYROS"}'
+		    	url = row[0][0]
+		    	# Insertar evento
+		    	initDate = long(datetime.utcnow().strftime('%s'))*1000
+		    	endDate = long(datetime.utcnow().strftime('%s'))*1000 + 3600000
+		    	queryNewEvent = "INSERT INTO SUMO_PENDING_EVENT (EVENT_JSON_DATA, URL, EVENT_DATE, LIMIT_DATE, SENT) VALUES ('" + str(data) + "','" + str(url) + "'," + str(initDate) + "," + str(endDate) + ",0)"
+		    	logger.info('New event clash: %s', data)
+		    	cursorEvent.execute(queryNewEvent)
+		    	row = cursor.fetchone()
+		    cursorEvent.close
+		    cursor.close
+		    dbConnection.commit()		    
+		    dbConnection.close()
+		except Exception, error:
+		    logger.error('Error executing query : %s', error)
+	except Exception, error:
+		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
+
 def newLogAlarm(vehicle1_license, vehicle1_alias, vehicle2_license, vehicle2_alias, distance):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
@@ -320,7 +355,7 @@ def getBoatData(vehicleLicense):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 		try:
-		    query = "SELECT EXCLUSION_ZONE, ALIAS FROM VEHICLE WHERE VEHICLE_LICENSE='"+vehicleLicense+"'"
+		    query = "SELECT EXCLUSION_ZONE, ALIAS, DEVICE_ID FROM VEHICLE WHERE VEHICLE_LICENSE='"+vehicleLicense+"'"
 		    cursor = dbConnection.cursor()
 		    cursor.execute(query)
 		    result = cursor.fetchall()
@@ -333,7 +368,7 @@ def getBoatData(vehicleLicense):
 		logger.error('Error connecting to database: IP:%s, USER:%s, PASSWORD:%s, DB:%s: %s', DB_IP, DB_USER, DB_PASSWORD, DB_NAME, error)
 
 def callback(ch, method, properties, body):
-    logger.info("ENVIANDO ACK A LA COLA")
+    #logger.info("ENVIANDO ACK A LA COLA")
     ch.basic_ack(delivery_tag = method.delivery_tag)
     sendMessage = False
     logger.info("Message read from QUEUE: %s" % body)
@@ -375,6 +410,7 @@ def callback(ch, method, properties, body):
 			boatData = getBoatData(vehicleLicense)
 			boatRadius = boatData[0]
 			boatAlias = boatData[1]
+			boatDevice = boatData[2]
 			boatNearby = getBoatCloser(lon,lat, maxradius)
 			if (boatNearby!=0):
 				for boat in boatNearby:
@@ -383,8 +419,10 @@ def callback(ch, method, properties, body):
 					if (int(distance) < boatRadius and vehicleLicense!=newVehicleLicense):
 						newBoatData = getBoatData(newVehicleLicense)
 						newBoatAlias = newBoatData[1]
+						newBoatDevice = newBoatData[2]
 						logger.info("Posibble clash of vessels: " + vehicleLicense + " - " + newVehicleLicense)
-						newLogAlarm(vehicleLicense, boatAlias, newVehicleLicense, newBoatAlias, distance)
+						#newLogAlarm(vehicleLicense, boatAlias, newVehicleLicense, newBoatAlias, distance)
+						recordEvent(boatDevice, boatAlias, newBoatDevice, newBoatAlias)
 
 	try:
 		socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -397,7 +435,7 @@ def callback(ch, method, properties, body):
 		socketKCS.close()
 		time.sleep(DEFAULT_SLEEP_TIME)
 	except socket.error,v:
-		print v[0]
+		#print v[0]
 		logger.error('Error sending data: %s', v[0])
 		try:
 			socketKCS.close()
