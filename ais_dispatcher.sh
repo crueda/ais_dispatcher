@@ -151,7 +151,7 @@ def setVesselInOut(vehicleLicense, inout):
 	try:
 		dbConnection = MySQLdb.connect(DB_IP, DB_USER, DB_PASSWORD, DB_NAME)
 		try:
-		    query = """UPDATE VEHICLE SET VEHICLE.INOUT=xxx WHERE VEHICLE_LICENSE='vvv'"""
+		    query = """UPDATE VEHICLE SET VEHICLE.INOUT_WF=xxx WHERE VEHICLE_LICENSE='vvv'"""
 		    queryINOUT = query.replace('vvv', str(vehicleLicense)).replace('xxx', str(inout))
 		    cursor = dbConnection.cursor()
 		    cursor.execute(queryINOUT)
